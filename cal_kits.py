@@ -2,6 +2,12 @@ import skrf
 from skrf.media import DefinedGammaZ0
 import numpy as np
 
+# Line creation routines shamelessly STOLEN from
+#
+#    https://scikit-rf.readthedocs.io/en/latest/examples/metrology/SOLT%20Calibration%20Standards%20Creation.html
+#
+# Seriously, though, thanks for the writeup mhuser. It was so good I even read it before stealing your code.
+
 def keysight_calkit_offset_line(freq, offset_delay, offset_loss, offset_z0, port_z0):
     if offset_delay or offset_loss:
         alpha_l = (offset_loss * offset_delay) / (2 * offset_z0)
