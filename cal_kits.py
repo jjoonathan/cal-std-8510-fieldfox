@@ -99,6 +99,23 @@ class Keysight85056D():
         self.cal.run()
         return self  
 
+def feathered_lowpass(f, begin_stepdown_f, end_stepdown_f):
+    f = f.flatten()
+    weight = np.interp(f, [begin_stepdown_f, end_stepdown_f], [1,0])
+    return weight.reshape(-1,1,1)
+
+def feathered_highpass(f, begin_stepup_f, end_stepup_f):
+    f = f.flatten()
+    weight = np.interp(f, [begin_stepup_f, end_stepup_f], [0,1])
+    return weight.reshape(-1,1,1)
+
+def join_cals(cal_list):
+    fs = np.concatenate([cal.frequency.f for cal in cal_list])
+    coefs = dict()
+    for k in cal_list[0].coefs.keys():
+        coefs[k] = np.concatenate([cal.coefs[k] for cal in cal_list])
+    return skrf.OnePort.from_coefs(skrf.Frequency.from_f(fs), coefs)
+
 
 class Keysight85058BP():
     def __init__(self, freqs):
@@ -130,24 +147,62 @@ class Keysight85058BP():
         return self.cal.apply_cal(net)
 
     @classmethod
-    def one_port_m(cls, measured_f_short1, measured_f_open, measured_f_load, use_coarse_definition=True):
+    def one_port_m(cls, measured_f_short1, measured_f_open, measured_f_load):
         assert measured_f_open.frequency == measured_f_short1.frequency
         assert measured_f_short1.frequency == measured_f_load.frequency
         self = cls(measured_f_open.frequency)
-        if use_coarse_definition:
-            self.cal = skrf.OnePort(
-                ideals = [self.f_short1_bb, self.f_open_bb, self.f_load],
-                measured = [measured_f_short1, measured_f_open, measured_f_load]
-            )
-            self.cal.run()
-            return self
-        self.cal_lb = skrf.OnePort(
-            ideals = [self.f_short1_lb, self.f_open_bb, self.f_load],
+        self.cal = skrf.OnePort(
+            ideals = [self.f_short1_bb,  self.f_open_bb, self.f_load],
             measured = [measured_f_short1, measured_f_open, measured_f_load]
         )
+        self.cal.run()
+        return self
 
     @classmethod
-    def one_port_f(cls, measured_m_short1, measured_m_open, measured_m_load, use_coarse_definition=True):
+    def one_port_m_SSS(cls, measured_f_short1, measured_f_short2, measured_f_short3, measured_f_short4, measured_f_open, measured_f_load):
+        assert measured_f_short1.frequency==measured_f_short2.frequency
+        assert measured_f_short2.frequency==measured_f_short3.frequency
+        assert measured_f_short3.frequency==measured_f_short4.frequency
+        assert measured_f_short4.frequency==measured_f_open.frequency
+        assert measured_f_open.frequency==measured_f_load.frequency
+        self = cls(measured_f_short1.frequency)
+        f = measured_f_short1.f
+        f_lb = f[f<35e9]
+        f_hb = f[f>=35e9]
+
+        self.cal_lb = skrf.OnePort(
+            ideals = [
+                self.f_short1_lb.interpolate(f_lb),
+                self.f_open_lb.interpolate(f_lb),
+                self.f_load.interpolate(f_lb)
+            ],
+            measured = [
+                measured_f_short1.interpolate(f_lb),
+                measured_f_open.interpolate(f_lb),
+                measured_f_load.interpolate(f_lb)
+            ]
+        )
+        self.cal_lb.run()
+        self.cal_hb = skrf.OnePort(
+            ideals = [
+                self.f_short1_hb.interpolate(f_hb),
+                self.f_short2.interpolate(f_hb),
+                self.f_short3.interpolate(f_hb),
+                self.f_short4.interpolate(f_hb),
+            ],
+            measured = [
+                measured_f_short1.interpolate(f_hb),
+                measured_f_short2.interpolate(f_hb),
+                measured_f_short3.interpolate(f_hb),
+                measured_f_short4.interpolate(f_hb)
+            ]
+        )
+        self.cal_hb.run()
+        self.cal = join_cals((self.cal_lb,self.cal_hb))
+        return self
+
+    @classmethod
+    def one_port_f(cls, measured_m_short1, measured_m_open, measured_m_load, use_coarse_definition=False):
         assert measured_m_open.frequency == measured_m_short1.frequency
         assert measured_m_short1.frequency == measured_m_load.frequency
         self = cls(measured_m_open.frequency)
@@ -158,3 +213,12 @@ class Keysight85058BP():
             )
             self.cal.run()
             return self  
+        self.cal_lb = skrf.OnePort(
+            ideals = [self.f_short1_lb, self.f_open_lb, self.f_load],
+            measured = [measured_f_short1, measured_f_open, measured_f_load]
+        )
+        self.cal_hb = skrf.OnePort(
+            ideals = [self.f_short1_hb, self.f_open_hb, self.f_load],
+            measured = [measured_f_short1, measured_f_open, measured_f_load]
+        )
+        return self
